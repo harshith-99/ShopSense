@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="face-api.js"></script>
+  <script src="js/commons.js"></script>
+  <script src="js/bbt.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/0.100.2/css/materialize.css">
+  <script type="text/javascript" src="https://code.jquery.com/jquery-2.1.1.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/0.100.2/js/materialize.min.js"></script>
+  <style>
+    table {
+      border-collapse: collapse;
+      width: 64%;
+      margin-left: 18pc;
+    }
+
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+    }
+
+    th {
+      background-color: #f2f2f2;
+    }
+  </style>
+</head>
+<body>
+  <div id="navbar"></div>
+  <div class="center-content page-container">
+    <div>
+      <div class="progress" id="loader">
+        <h4>Loading Please Wait</h4>
+        <div class="indeterminate"></div>
+      </div>
+      <div class="row side-by-side" style="display: none;">
+        <div class="center-content">
+          <img id="face1" src="" class="margin"/>
+          <div id="selectList1"></div>
+        </div>
+        <div class="center-content">
+          <img id="face2" src="" class="margin"/>
+          <div id="selectList2"></div>
+        </div>
+      </div>
+      <div class="row" style="display: none;">
+        <label for="distance">Distance:</label>
+        <input disabled value="-" id="distance" type="text" class="bold">
+      </div>
+        <div class="row side-by-side">
+            <div id="date_sec">
+              <label for="numImages">Select Date:</label>
+              <input id="date" type="date" class="bold">
+            </div>
+            <button
+              id="ok-bt"
+              class="waves-effect waves-light btn"
+              onclick="fetchData()"
+            >
+              Ok
+            </button>
+          </div>
+          <h6 id="date_val"></h6>
+          <h6 id="visitorCount">Total Number of People Visited: 0</h6>
+    </div>
+  </div>
+
+  <table id="dataTable" >
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Date</th>
+        <th>Time</th>
+        <th>Age</th>
+        <th>Gender</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="dataBody"></tbody>
+  </table>
+  
+
+  <script>
+
+const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    let currentMonth = currentDate.getMonth() + 1; // Note: Months are zero-based, so add 1
+    let currentDay = currentDate.getDate();
+
+    if(currentDay<=9)
+    {
+      currentDay='0'+currentDay;
+    }
+    if(currentMonth<=9)
+    {
+      currentMonth='0'+currentMonth;
+    }
+    const threshold = 0.5
+    let descriptors = { desc1: null, desc2: null }
+
+    function updateResult() {
+      const distance = faceapi.utils.round(
+        faceapi.euclideanDistance(descriptors.desc1, descriptors.desc2)
+      )
+      let text = distance
+      let bgColor = '#ffffff'
+      if (distance > threshold) {
+        text += ' (no match)'
+        bgColor = '#ce7575'
+      }
+      $('#distance').val(text)
+      $('#distance').css('background-color', bgColor)
+    }
+
+    async function onSelectionChanged(which, uri) {
+      const input = await faceapi.fetchImage(uri)
+      const imgEl = $(`#face${which}`).get(0)
+      imgEl.src = input.src
+      descriptors[`desc${which}`] = await faceapi.computeFaceDescriptor(input)
+    }
+
+    async function run() {
+      await  faceapi.loadFaceRecognitionModel()
+      await onSelectionChanged(1, $('#selectList1 select').val())
+      await onSelectionChanged(2, $('#selectList2 select').val())
+      updateResult()
+    }
+
+    fetch('http://localhost:3000/image-names')
+      .then(response => response.json())
+      .then(async(data) => {
+        // const imageList = document.getElementById('imageList');
+        const face_list = [];
+        // Check if data is an array
+        if (Array.isArray(data)) {
+          data.forEach(name => {
+            face_list.push(name);
+          });
+        }
+        
+        for (let i = 0; i < face_list.length - 1; i++) {
+          console.log(face_list[i]);
+          console.log(face_list[i+1]);
+          const face1 = `faces/${currentYear}-${currentMonth}-${currentDay}/`+face_list[i];
+          const face2 = `faces/${currentYear}-${currentMonth}-${currentDay}/`+face_list[i + 1];
+          await faceapi.loadFaceRecognitionModel();
+          await onSelectionChanged(1, face1);
+          await onSelectionChanged(2, face2);
+
+        // Get the distance between the two faces
+        const distance = faceapi.utils.round(
+          faceapi.euclideanDistance(descriptors.desc1, descriptors.desc2)
+        );
+          if(distance<0.6)
+          {
+              const response = await fetch('http://localhost:3000/compare-faces', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({face1}),
+            });
+
+            const result = await response.json();
+            console.log(result);
+          }
+          $('#loader').show();
+        }
+
+        insert_databse()
+        
+      })
+
+
+      //insert into database
+    async function insert_databse() {
+      fetch('http://localhost:3000/image-names')
+      .then(response => response.json())
+      .then(async (data) => {
+        const face_list = Array.isArray(data) ? data : [];
+
+    for (let i = 0; i < face_list.length; i++) {
+      console.log(face_list[i]);
+      const data = { face_list: [face_list[i]] };
+
+      fetch('http://localhost:3000/insertData', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      })
+        .then(response => response.json())
+        .then(result => {
+          console.log('Success:', result);
+        })
+        .catch(error => {
+          console.error('Error:', error);
+        });
+    }
+    fetchData()
+  });
+  
+}
+  function fetchData() {
+    $('#loader').hide();
+    var date_sec = document.getElementById("date_sec");
+    var ok_bt = document.getElementById("ok-bt");
+    date_sec.style.display = "block";
+    ok_bt.style.display = "block";
+    var selectedDate = document.getElementById('date').value;
+    if(selectedDate=="")
+    {
+      var currentDate = new Date();
+
+        // Get individual components of the date
+        var year = currentDate.getFullYear();
+        var month = ('0' + (currentDate.getMonth() + 1)).slice(-2); // Months are zero-based, so add 1
+        var day = ('0' + currentDate.getDate()).slice(-2);
+
+        // Create the formatted date string (YYYY-MM-DD)
+        var formattedDate = year + '-' + month + '-' + day;
+        selectedDate=formattedDate;
+        
+    }
+    document.getElementById('date_val').innerHTML ="Date: "+selectedDate;
+
+    // Fetch data from the server for the selected date
+    fetch('http://localhost:3000/people_count', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ selectedDate }),
+    })
+      .then(response => response.json())
+      .then(data => {
+        const dataBody = document.getElementById('dataBody');
+        dataBody.innerHTML = ''; // Clear previous data
+        var i=1;
+        data.forEach(item => {
+          const row = document.createElement('tr');
+          row.innerHTML = `<td>${i}</td><td>${item.date}</td><td>${item.time}</td><td>${item.age}</td><td>${item.gender}</td><td><img style="height: 10pc;"src='http://localhost:3000/faces/${item.date}/${item.img_path}'></td>`;
+          dataBody.appendChild(row);
+          i=i+1;
+        });
+        if(i==1)
+        {
+          const dataBody = document.getElementById('dataBody');
+          dataBody.innerHTML = ''; // Clear previous data
+          const row = document.createElement('tr');
+          row.innerHTML = `<th colspan="6" style='text-align:center;'> No Records</th>`;
+          dataBody.appendChild(row);
+        }
+        document.getElementById('visitorCount').innerHTML = 'Total Number of People Visited: ' + parseInt(i-1);
+      })
+      
+      .catch(error => console.error('Error fetching data:', error));
+      
+  }
+
+
+    
+
+  $(document).ready(function() {
+  renderNavBar('#navbar', 'people_count');
+  run();
+    $('#loader').hide();
+    const dataBody = document.getElementById('dataBody');
+    dataBody.innerHTML = ''; // Clear previous data
+    const row = document.createElement('tr');
+    row.innerHTML = `<th colspan="6" style='text-align:center;'> No Records</th>`;
+    dataBody.appendChild(row);
+  
+  // setTimeout(function() {
+  //   location.reload();
+  // }, 10000); 
+});
+
+      
+    
+
+  </script>
+
+</body>
+</html>
+
+
+

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="face-api.js"></script>
+  <script src="js/commons.js"></script>
+  <script src="js/bbt.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/0.100.2/css/materialize.css">
+  <script type="text/javascript" src="https://code.jquery.com/jquery-2.1.1.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/0.100.2/js/materialize.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div id="navbar"></div>
+  <div class="center-content page-container">
+    <div class="row side-by-side">
+      <div id="date_sec" >
+        <label for="numImages">Select Date:</label>
+        <input id="date" type="date" class="bold">
+      </div>
+      <button
+        id="ok-bt"
+        class="waves-effect waves-light btn"
+        onclick="fetchData()"
+      >
+        Ok
+      </button>
+    </div>
+    <div style="margin-top: -32px;">
+        <h6 id="averageTime"></h6>
+        <h6 id="date_val"></h6>
+      </div>
+    <div>
+        <canvas id="timeVisitedChart" width="400" height="400"></canvas>
+    </div>
+    
+  </div>
+  <script>
+function fetchData() {
+    var selectedDate = document.getElementById('date').value;
+  if (selectedDate == "") {
+    var currentDate = new Date();
+
+    // Get individual components of the date
+    var year = currentDate.getFullYear();
+    var month = ('0' + (currentDate.getMonth() + 1)).slice(-2); // Months are zero-based, so add 1
+    var day = ('0' + currentDate.getDate()).slice(-2);
+
+    // Create the formatted date string (YYYY-MM-DD)
+    var formattedDate = year + '-' + month + '-' + day;
+    selectedDate = formattedDate;
+  }
+  document.getElementById('date_val').innerHTML ="Date: "+selectedDate;
+
+  // Fetch data from the server based on the user-defined date
+  fetch(`/average_time/${selectedDate}`)
+    .then(response => response.json())
+    .then(data => {
+      // Display the average time on the page
+      const averageTimeElement = document.getElementById('averageTime');
+      averageTimeElement.textContent = `Most Visits Time: ${data.averageTime}`;
+
+      // Draw the line graph using Chart.js
+      const times = data.data.map(entry => entry.time);
+      const counts = data.data.map(entry => entry.visit_count);
+
+      const ctx = document.getElementById('timeVisitedChart').getContext('2d');
+      const existingChart = Chart.getChart(ctx);
+
+  // Destroy the existing chart if it exists
+    if (existingChart) {
+        existingChart.destroy();
+    }
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: times,
+          datasets: [{
+            label: 'Number of Visitors',
+            data: counts,
+            borderColor: 'rgba(75, 192, 192, 1)',
+            borderWidth: 2,
+            fill: false,
+          }]
+        },
+        options: {
+          scales: {
+            x: {
+              title: {
+                display: true,
+                text: 'Time',
+              },
+            },
+            y: {
+              title: {
+                display: true,
+                text: 'Number of Visitors',
+              },
+            },
+          },
+        },
+      });
+    });
+}
+
+async function run() {
+      await  faceapi.loadFaceRecognitionModel()
+      $('#loader').hide()
+    }
+
+    $(document).ready(function() {
+      renderNavBar('#navbar', 'averge_time_people_vistited')
+      fetchData()
+      run()
+    })
+    
+  </script>
+
+</body>
+</html>

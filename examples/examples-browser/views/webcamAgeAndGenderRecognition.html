@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="face-api.js"></script>
+  <script src="js/commons.js"></script>
+  <script src="js/faceDetectionControls.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/0.100.2/css/materialize.css">
+  <script type="text/javascript" src="https://code.jquery.com/jquery-2.1.1.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/0.100.2/js/materialize.min.js"></script>
+</head>
+<body>
+  <div id="navbar"></div>
+  <div class="center-content page-container">
+
+    <div class="progress" id="loader">
+      <div class="indeterminate"></div>
+    </div>
+    <div style="position: relative" class="margin">
+      <video onloadedmetadata="onPlay(this)" id="inputVideo" autoplay muted playsinline></video>
+      <canvas id="overlay" />
+    </div>
+
+    <div class="row side-by-side">
+
+      <!-- face_detector_selection_control -->
+      <div id="face_detector_selection_control" class="row input-field" style="margin-right: 20px;display: none;">
+        <select id="selectFaceDetector">
+          <option value="ssd_mobilenetv1">SSD Mobilenet V1</option>
+          <option value="tiny_face_detector">Tiny Face Detector</option>
+        </select>
+        <label>Select Face Detector</label>
+      </div>
+      <!-- face_detector_selection_control -->
+
+      <!-- check boxes -->
+      <div class="row" style="width: 220px; display: none;">
+        <input type="checkbox" id="hideBoundingBoxesCheckbox" onchange="onChangeHideBoundingBoxes(event)" />
+        <label for="hideBoundingBoxesCheckbox">Hide Bounding Boxes</label>
+      </div>
+      <!-- check boxes -->
+
+      <!-- fps_meter -->
+      <div id="fps_meter" class="row side-by-side" style="display: none;">
+        <div>
+          <label for="time">Time:</label>
+          <input disabled value="-" id="time" type="text" class="bold">
+          <label for="fps">Estimated Fps:</label>
+          <input disabled value="-" id="fps" type="text" class="bold">
+        </div>
+      </div>
+      <!-- fps_meter -->
+
+    </div>
+
+
+    <!-- ssd_mobilenetv1_controls -->
+    <span id="ssd_mobilenetv1_controls" style="display: none;">
+      <div class="row side-by-side">
+        <div class="row">
+          <label for="minConfidence">Min Confidence:</label>
+          <input disabled value="0.5" id="minConfidence" type="text" class="bold">
+        </div>
+        <button
+          class="waves-effect waves-light btn"
+          onclick="onDecreaseMinConfidence()"
+        >
+          <i class="material-icons left">-</i>
+        </button>
+        <button
+          class="waves-effect waves-light btn"
+          onclick="onIncreaseMinConfidence()"
+        >
+          <i class="material-icons left">+</i>
+        </button>
+      </div>
+    </span>
+    <!-- ssd_mobilenetv1_controls -->
+
+    <!-- tiny_face_detector_controls -->
+    <span id="tiny_face_detector_controls" style="display: none;">
+      <div class="row side-by-side" style="display: none;">
+        <div class="row input-field" style="margin-right: 20px;">
+          <select id="inputSize">
+            <option value="" disabled selected>Input Size:</option>
+            <option value="128">128 x 128</option>
+            <option value="160">160 x 160</option>
+            <option value="224">224 x 224</option>
+            <option value="320">320 x 320</option>
+            <option value="416">416 x 416</option>
+            <option value="512">512 x 512</option>
+            <option value="608">608 x 608</option>
+          </select>
+          <label>Input Size</label>
+        </div>
+        <div class="row" style="display: none;">
+          <label for="scoreThreshold">Score Threshold:</label>
+          <input disabled value="0.5" id="scoreThreshold" type="text" class="bold">
+        </div>
+        <button
+          class="waves-effect waves-light btn"
+          onclick="onDecreaseScoreThreshold()"
+        >
+          <i class="material-icons left">-</i>
+        </button>
+        <button
+          class="waves-effect waves-light btn"
+          onclick="onIncreaseScoreThreshold()"
+        >
+          <i class="material-icons left">+</i>
+        </button>
+      </div>
+    </span>
+    <!-- tiny_face_detector_controls -->
+
+  </body>
+
+  <script>
+    let forwardTimes = []
+    let predictedAges = []
+    let withBoxes = true
+
+    function onChangeHideBoundingBoxes(e) {
+      withBoxes = !$(e.target).prop('checked')
+    }
+
+    function updateTimeStats(timeInMs) {
+      forwardTimes = [timeInMs].concat(forwardTimes).slice(0, 30)
+      const avgTimeInMs = forwardTimes.reduce((total, t) => total + t) / forwardTimes.length
+      $('#time').val(`${Math.round(avgTimeInMs)} ms`)
+      $('#fps').val(`${faceapi.utils.round(1000 / avgTimeInMs)}`)
+    }
+
+    function interpolateAgePredictions(age) {
+      predictedAges = [age].concat(predictedAges).slice(0, 30)
+      const avgPredictedAge = predictedAges.reduce((total, a) => total + a) / predictedAges.length
+      return avgPredictedAge
+    }
+
+    async function onPlay() {
+      const videoEl = $('#inputVideo').get(0)
+
+      if(videoEl.paused || videoEl.ended || !isFaceDetectionModelLoaded())
+        return setTimeout(() => onPlay())
+
+
+      const options = getFaceDetectorOptions()
+
+      const ts = Date.now()
+
+      const result = await faceapi.detectSingleFace(videoEl, options)
+        .withAgeAndGender()
+
+      updateTimeStats(Date.now() - ts)
+
+      if (result) {
+        const canvas = $('#overlay').get(0)
+        const dims = faceapi.matchDimensions(canvas, videoEl, true)
+
+        const resizedResult = faceapi.resizeResults(result, dims)
+        if (withBoxes) {
+          faceapi.draw.drawDetections(canvas, resizedResult)
+        }
+        const { age, gender, genderProbability } = resizedResult
+
+        // interpolate gender predictions over last 30 frames
+        // to make the displayed age more stable
+        const interpolatedAge = interpolateAgePredictions(age)
+        new faceapi.draw.DrawTextField(
+          [
+            `${faceapi.utils.round(interpolatedAge, 0)} years`,
+            `${gender} (${faceapi.utils.round(genderProbability)})`
+          ],
+          result.detection.box.bottomLeft
+        ).draw(canvas);
+
+            // Capture and save the face image along with age and gender
+            const faceImageData = await captureFaceInfo(videoEl, result, age, gender, genderProbability);
+            saveFaceInfo(faceImageData);
+      }
+
+      setTimeout(() => onPlay())
+    }
+
+    // Function to capture the face image along with age and gender
+      async function captureFaceInfo(video, result, age, gender, genderProbability) {
+        const faceCanvas = document.createElement('canvas');
+        const context = faceCanvas.getContext('2d');
+        const box = result.detection.box;
+
+        faceCanvas.width = box.width;
+        faceCanvas.height = box.height;
+
+        context.drawImage(video, box.x, box.y, box.width, box.height, 0, 0, box.width, box.height);
+        
+        // alert(faceCanvas.toDataURL('image/png'))
+        return {
+          imageData: faceCanvas.toDataURL('image/png'),
+          age: faceapi.utils.round(age, 0),
+          gender: gender,
+          genderProbability: faceapi.utils.round(genderProbability)
+        };
+      }
+
+function saveFaceInfo(faceInfo) {
+  // Use AJAX or any other method to send the captured face information to the server
+  // and save it in the desired folder on the server.
+
+  // Generate a unique filename based on the current date, age, and gender
+  const currentDate = new Date();
+  const formattedDate = `${currentDate.getFullYear()}-${currentDate.getMonth() + 1}-${currentDate.getDate()}`;
+  const fileName = `${formattedDate}_${faceInfo.age}_${faceInfo.gender}.png`;
+
+  // Create a FormData object to send the image data
+  const formData = new FormData();
+  formData.append('image', dataURItoBlob(faceInfo.imageData), fileName);
+  formData.append('age', faceInfo.age);
+  formData.append('gender', faceInfo.gender);
+  formData.append('genderProbability', faceInfo.genderProbability);
+
+  // Example AJAX call (using jQuery):
+  $.ajax({
+    type: 'POST',
+    url: 'http://localhost:3000/save_img',
+    data: formData,
+    contentType: false,
+    processData: false,
+    success: function(response) {
+      console.log('Face information saved successfully:', response);
+    },
+    error: function(error) {
+      console.error('Error saving face information:', error);
+    }
+  });
+}
+
+// Helper function to convert data URI to Blob
+function dataURItoBlob(dataURI) {
+  const byteString = atob(dataURI.split(',')[1]);
+  const ab = new ArrayBuffer(byteString.length);
+  const ia = new Uint8Array(ab);
+  for (let i = 0; i < byteString.length; i++) {
+    ia[i] = byteString.charCodeAt(i);
+  }
+  return new Blob([ab], { type: 'image/png' });
+}
+
+    async function run() {
+      // load face detection and face expression recognition models
+      await changeFaceDetector(TINY_FACE_DETECTOR)
+      await faceapi.nets.ageGenderNet.load('/')
+      changeInputSize(224)
+
+      // try to access users webcam and stream the images
+      // to the video element
+      const stream = await navigator.mediaDevices.getUserMedia({ video: {} })
+      const videoEl = $('#inputVideo').get(0)
+      videoEl.srcObject = stream
+    }
+
+    function updateResults() {}
+
+    $(document).ready(function() {
+      renderNavBar('#navbar', 'webcam_age_and_gender_recognition')
+      initFaceDetectionControls()
+      run()
+    })
+  </script>
+</body>
+</html>
